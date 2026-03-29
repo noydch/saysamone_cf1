@@ -1,72 +1,65 @@
 const express = require('express');
 const router = express.Router();
-const { addCommentToQueue } = require('../queues/commentQueue');
+const commentProcessor = require('../services/commentProcessor');
 
-// GET /api/webhook/facebook 
-// Used by Facebook to verify the webhook integration
+// 1. GET request for Webhook Verification (Facebook calls this)
 router.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode && token) {
-    if (mode === 'subscribe' && token === process.env.FB_VERIFY_TOKEN) {
-      console.log('WEBHOOK_VERIFIED');
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
+  // Check if mode and token is correct
+  if (mode === 'subscribe' && token === (process.env.FB_VERIFY_TOKEN || 'my_secret_verify_token')) {
+    console.log('WEBHOOK_VERIFIED');
+    return res.status(200).send(challenge);
   } else {
-     // Mock Verify for testing
-     res.status(200).send('Mock Verify OK. Provide hub.verify_token manually to mimic FB.');
+    console.log('WEBHOOK_VERIFICATION_FAILED');
+    return res.sendStatus(403);
   }
 });
 
-// POST /api/webhook/facebook
-// Used by Facebook to push new comments (events)
+// 2. POST request for real-time events (incoming comments)
 router.post('/', async (req, res) => {
-  const body = req.body;
-  const isMock = body.isMock === true; 
-
-  // Fast return 200 OK so Facebook doesn't timeout
+  // Always respond with 200 OK immediately to Facebook
   res.status(200).send('EVENT_RECEIVED');
 
-  // Actual Facebook Hook Structure logic OR Mock Custom logic
-  if (body.object === 'page' || isMock) {
-    // We are mocking to speed up testing
-    if (isMock) {
-        console.log('Processing MOCK Facebook Webhook Event');
-        await addCommentToQueue({
-            commentId: body.commentId || 'mock_comment_' + Date.now(),
-            message: body.message || 'CF 1',
-            senderName: body.senderName || 'Tester ' + Math.floor(Math.random()*100),
-            senderId: body.senderId || 'mock_fb_id_001',
-            pageId: body.pageId || process.env.MOCK_FB_PAGE_ID,
-            postId: body.postId || 'mock_post_001'
-        });
-        return;
+  try {
+    const body = req.body;
+    
+    // For Mock Testing (Simulate comment button)
+    if (body.isMock) {
+       console.log('MOCK_WEBHOOK_RECEIVED');
+       const io = req.app.get('io');
+       // Simulate a CF comment processing
+       await commentProcessor.processComment({
+         from: { id: 'mock_user_123', name: 'Mock User' },
+         message: body.message || 'CF1',
+         created_time: new Date().toISOString(),
+         post_id: 'mock_post_123',
+         id: 'mock_comment_' + Date.now()
+       }, io);
+       return;
     }
 
-    // Real Facebook payload
-    body.entry.forEach(function(entry) {
-      const pageId = entry.id;
+    // For Real Facebook Events
+    if (body.object === 'page') {
+      const io = req.app.get('io');
       
-      // Gets the body of the webhook event
-      const webhook_event = entry.changes[0].value;
-      
-      if (webhook_event.item === 'comment' && webhook_event.verb === 'add') {
-         // It's a new comment!
-         addCommentToQueue({
-             commentId: webhook_event.comment_id,
-             message: webhook_event.message,
-             senderName: webhook_event.from.name,
-             senderId: webhook_event.from.id,
-             pageId: pageId,
-             postId: webhook_event.post_id
-         });
-      }
-    });
-  } 
+      body.entry.forEach(async (entry) => {
+        if (entry.changes) {
+          entry.changes.forEach(async (change) => {
+            if (change.field === 'feed' && change.value.item === 'comment' && change.value.verb === 'add') {
+               console.log('REAL_COMMENT_RECEIVED:', change.value.message);
+               // Process real comment
+               await commentProcessor.processComment(change.value, io);
+            }
+          });
+        }
+      });
+    }
+  } catch (err) {
+    console.error('Webhook Error:', err);
+  }
 });
 
 module.exports = router;
