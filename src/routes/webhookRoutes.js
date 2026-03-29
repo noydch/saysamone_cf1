@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const commentProcessor = require('../services/commentProcessor');
 
-// 1. GET request for Webhook Verification (Facebook calls this)
+// 1. GET request for Webhook Verification (Facebook calls this)อ
 router.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
