@@ -59,9 +59,9 @@ io.on('connection', (socket) => {
   });
 });
 
-// Initialize queue worker
-const { initWorker } = require('./queues/commentQueue');
-const commentWorker = initWorker(io);
+// Initialize queue worker (Disabled to avoid Redis connection errors on Render)
+// const { initWorker } = require('./queues/commentQueue');
+// const commentWorker = initWorker(io);
 
 // Mount Routes
 app.use('/api/auth', authRoutes);
